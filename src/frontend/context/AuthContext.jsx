@@ -6,52 +6,70 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState(null); // Initialize explicitly as null
+  const [loading, setLoading] = useState(true); // Start loading
   const [sessionToken, setSessionToken] = useState(null); // Store the token
 
   useEffect(() => {
+    let isMounted = true; // Flag to prevent state updates on unmounted component
+
+    const processSession = (session) => {
+      if (!isMounted) {
+        console.log("AuthContext: processSession called on unmounted component. Skipping state updates.");
+        return;
+      }
+
+      if (session) {
+        console.log("AuthContext: Processing session", session);
+        setUser(session.user);
+        setSessionToken(session.access_token);
+        let finalRole = null; // Variable to hold the role before setting state
+        try {
+          const decoded = jwtDecode(session.access_token);
+          console.log("AuthContext: Full Decoded JWT:", decoded);
+
+          // *** FIX: Explicitly check for user_metadata.role ***
+          finalRole = decoded?.user_metadata?.role || null; // Only check user_metadata.role
+
+          console.log("AuthContext: Extracted userRole:", finalRole); // Log extracted role
+          if (!finalRole) {
+             console.warn("AuthContext: Role not found in JWT token's user_metadata.");
+          }
+          setRole(finalRole); // Set the specific role (or null if not found)
+          console.log("AuthContext: setRole called with:", finalRole); // Log after setRole
+        } catch (e) {
+          console.error("AuthContext: Error decoding JWT:", e);
+          setRole(null); // Set role to null on error
+          console.log("AuthContext: setRole called with null due to error"); // Log after setRole (error)
+        } finally {
+          console.log("AuthContext: Calling setLoading(false) in finally block (session exists)"); // Log before setLoading
+          setLoading(false);
+        }
+      } else {
+        console.log("AuthContext: No active session found or session ended.");
+        setUser(null);
+        setRole(null);
+        setSessionToken(null);
+        console.log("AuthContext: Calling setLoading(false) in else block (no session)"); // Log before setLoading
+        setLoading(false); // Set loading false if no session
+      }
+    };
+
     const fetchSession = async () => {
-      setLoading(true);
+      console.log("AuthContext: fetchSession called");
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
+        console.log("AuthContext: getSession completed", { session, error });
 
         if (error) {
           console.error("Error getting session:", error);
-          setUser(null);
-          setRole(null);
-          setSessionToken(null);
-        } else if (session) {
-          console.log("AuthContext: Session found", session);
-          setUser(session.user);
-          setSessionToken(session.access_token); // Store the token
-          // Decode the JWT to get the role
-          try {
-            const decoded = jwtDecode(session.access_token);
-            console.log("AuthContext: Decoded JWT", decoded);
-            // Adjust based on your actual JWT structure for roles
-            const userRole = decoded?.user_metadata?.role || decoded?.role || null;
-             if (!userRole) {
-               console.warn("AuthContext: Role not found in JWT token.");
-             }
-            setRole(userRole);
-          } catch (e) {
-            console.error("AuthContext: Error decoding JWT:", e);
-            setRole(null);
-          }
+          processSession(null); // Process null session on error
         } else {
-          console.log("AuthContext: No active session found.");
-          setUser(null);
-          setRole(null);
-          setSessionToken(null);
+          processSession(session); // Process the found session
         }
       } catch (e) {
          console.error("AuthContext: Unexpected error fetching session:", e);
-         setUser(null);
-         setRole(null);
-         setSessionToken(null);
-      } finally {
-        setLoading(false);
+         processSession(null); // Process null session on unexpected error
       }
     };
 
@@ -60,35 +78,18 @@ export const AuthProvider = ({ children }) => {
     // Listen for auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log(`AuthContext: Auth event - ${event}`, session);
-        setLoading(true);
-        if (session) {
-          setUser(session.user);
-          setSessionToken(session.access_token); // Update token on change
-           try {
-             const decoded = jwtDecode(session.access_token);
-             const userRole = decoded?.user_metadata?.role || decoded?.role || null;
-              if (!userRole) {
-                 console.warn("AuthContext: Role not found in JWT token on auth change.");
-              }
-             setRole(userRole);
-           } catch (e) {
-             console.error("AuthContext: Error decoding JWT on auth change:", e);
-             setRole(null);
-           }
-        } else {
-          setUser(null);
-          setRole(null);
-          setSessionToken(null); // Clear token on sign out
-        }
-        setLoading(false);
+        console.log(`AuthContext: Auth event received - ${event}`, session);
+        processSession(session); // Process the session from the event
       }
     );
 
     // Cleanup listener on component unmount
     return () => {
+      console.log("AuthContext: Unmounting. Cleaning up listener.");
+      isMounted = false; // Set flag on unmount
       if (authListener && typeof authListener.subscription?.unsubscribe === 'function') {
         authListener.subscription.unsubscribe();
+        console.log("AuthContext: Unsubscribed from auth listener.");
       } else {
         console.warn("AuthContext: Could not unsubscribe from auth listener.");
       }
@@ -96,14 +97,13 @@ export const AuthProvider = ({ children }) => {
   }, []); // Empty dependency array ensures this runs only once on mount
 
   const logout = async () => {
-    setLoading(true);
+    console.log("AuthContext: logout called");
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Error logging out:", error);
-      // Handle error appropriately, maybe show a notification
+    } else {
+       console.log("AuthContext: signOut successful");
     }
-    // State updates (user, role, token) are handled by the onAuthStateChange listener
-    setLoading(false);
   };
 
 

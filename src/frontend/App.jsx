@@ -7,18 +7,53 @@ import ResellerAdminDashboard from './pages/ResellerAdminDashboard'; // Correct 
 import GlobalAdminDashboard from './pages/GlobalAdminDashboard'; // Correct path
 import ProtectedRoute from './components/ProtectedRoute'; // Correct path
 
+// Helper function to determine the correct dashboard path based on role
+const getDashboardPath = (role) => {
+  console.log(`App.jsx: getDashboardPath called with role: ${role}`); // Log role input
+  switch (role) {
+    case 'company_admin':
+      return '/company-dashboard';
+    case 'reseller_admin':
+      return '/reseller-dashboard';
+    case 'global_admin':
+      return '/global-dashboard';
+    default:
+      console.warn(`App.jsx: Unknown role '${role}', defaulting dashboard path to /login`);
+      // Fallback if role is unknown or user has no specific role dashboard
+      // Redirecting to login might be safer if role determination fails
+      return '/login'; // Defaulting to login might cause issues if already logged in, but let's see
+  }
+};
+
+
 function App() {
   const { user, loading, role } = useAuth();
 
+  console.log(`App.jsx: Rendering - Loading: ${loading}, User: ${!!user}, Role: ${role}`); // Log state on render
+
   if (loading) {
+    console.log("App.jsx: Rendering Loading state...");
     return <div>Loading...</div>; // Or a proper loading spinner
   }
+
+  // Calculate dashboard path *after* loading is false
+  const dashboardPath = user ? getDashboardPath(role) : '/login';
+  console.log(`App.jsx: Calculated dashboardPath: ${dashboardPath}`); // Log calculated path
 
   return (
     <Router>
       <Routes>
         {/* Public Route */}
-        <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDashboardPath(role)} replace />} />
+        <Route
+          path="/login"
+          element={
+            !user ? (
+              <LoginPage />
+            ) : (
+              <Navigate to={dashboardPath} replace /> // Use calculated path
+            )
+          }
+        />
 
         {/* Protected Routes */}
         <Route
@@ -50,31 +85,20 @@ function App() {
         <Route
           path="/"
           element={
-            user ? <Navigate to={getDashboardPath(role)} replace /> : <Navigate to="/login" replace />
+            user ? (
+              <Navigate to={dashboardPath} replace /> // Use calculated path
+            ) : (
+              <Navigate to="/login" replace />
+            )
           }
         />
 
         {/* Catch-all for unmatched routes (optional) */}
-        <Route path="*" element={<Navigate to={user ? getDashboardPath(role) : "/login"} replace />} />
+        {/* Redirect to login if not logged in, or dashboard if logged in */}
+        <Route path="*" element={<Navigate to={dashboardPath} replace />} />
       </Routes>
     </Router>
   );
 }
-
-// Helper function to determine the correct dashboard path based on role
-const getDashboardPath = (role) => {
-  switch (role) {
-    case 'company_admin':
-      return '/company-dashboard';
-    case 'reseller_admin':
-      return '/reseller-dashboard';
-    case 'global_admin':
-      return '/global-dashboard';
-    default:
-      // Fallback if role is unknown or user has no specific role dashboard
-      // Redirecting to login might be safer if role determination fails
-      return '/login';
-  }
-};
 
 export default App;

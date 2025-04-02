@@ -1,7 +1,8 @@
 // src/backend/routes/companyRoutes.js
 import express from 'express';
 import { authenticateToken, authorizeRole } from '../middleware/authMiddleware.js'; // Adjusted path
-import { getCompanyById, getCompanyForAdmin, updateCompanyForAdmin, getUsersForCompany } from '../services/companyService.js'; // Adjusted path
+// Removed getCompanyById from import as it's not exported/implemented yet
+import { getCompanyForAdmin, updateCompanyForAdmin, getUsersForCompany } from '../services/companyService.js'; // Adjusted path
 
 const router = express.Router();
 
@@ -92,7 +93,7 @@ router.get('/:companyId/users', authenticateToken, authorizeRole(['company_admin
 
 // GET /api/companies/:id - Get a specific company's details (for Reseller/Global Admins)
 // Add authorizeRole(['reseller_admin', 'global_admin'])
-// Use or adapt `getCompanyById(companyId, requestingUserId, requestingUserRole)` with proper checks
+// Use or adapt `getCompanyById(companyId, requestingUserId, requestingUserRole)` with proper checks // <-- This is where getCompanyById would be needed
 
 // POST /api/companies - Create a new company (for Reseller/Global Admins)
 // Add authorizeRole(['reseller_admin', 'global_admin'])
