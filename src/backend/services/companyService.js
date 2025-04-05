@@ -16,7 +16,9 @@ const getUserCompanyId = async (userId) => {
     }
     if (!user || !user.company_id) {
         console.warn(`CompanyService: User ${userId} is not associated with any company.`);
-        throw new Error('User is not associated with a company.');
+        // Allow function to proceed but return null, let caller handle non-association
+        // throw new Error('User is not associated with a company.');
+        return null;
     }
     console.log(`CompanyService: User ${userId} belongs to company ${user.company_id}`);
     return user.company_id;
@@ -29,6 +31,11 @@ export const getCompanyForAdmin = async (userId) => {
     try {
         const companyId = await getUserCompanyId(userId); // Verify user belongs to a company
 
+        // Throw error if user is not associated with a company
+        if (!companyId) {
+             throw new Error('User is not associated with a company.');
+        }
+
         // Fetch company details, including address and reseller info (name, contacts, address)
         // Use the standard client - RLS policy on 'companies' should allow users
         // to select their own company's details.
@@ -39,7 +46,7 @@ export const getCompanyForAdmin = async (userId) => {
                 address: addresses (*),
                 reseller: resellers (
                     id,
-                    name,
+                    reseller_name,
                     contact_email,
                     contact_phone,
                     address: addresses (*)
@@ -58,6 +65,13 @@ export const getCompanyForAdmin = async (userId) => {
             throw new Error(`Company not found for ID: ${companyId}`);
         }
 
+        // Rename reseller.reseller_name to reseller.name for frontend consistency if needed
+        if (companyData.reseller && companyData.reseller.reseller_name) {
+            companyData.reseller.name = companyData.reseller.reseller_name;
+            // delete companyData.reseller.reseller_name; // Optional: remove the original field
+        }
+
+
         console.log(`CompanyService: Successfully fetched company details for company ${companyId}`);
         return companyData;
 
@@ -68,123 +82,58 @@ export const getCompanyForAdmin = async (userId) => {
     }
 };
 
-// Update Company details for the currently logged-in Company Admin
+// Update Company details for the currently logged-in Company Admin using RPC for atomicity
 export const updateCompanyForAdmin = async (userId, updates) => {
     console.log(`CompanyService: updateCompanyForAdmin called for user ${userId} with updates:`, updates);
     try {
-        const companyId = await getUserCompanyId(userId); // Verify user belongs to a company and get ID
+        // Note: The RPC function performs its own check to ensure the user is a company admin
+        // and gets the company ID internally based on auth.uid(). We don't strictly need
+        // getUserCompanyId here anymore for the core logic.
 
         // Separate address updates from company updates
         const { address: addressUpdates, ...companyUpdates } = updates;
 
-        // Validate updates (basic example)
-        if (companyUpdates.id || companyUpdates.reseller_id || companyUpdates.created_at || companyUpdates.updated_at) {
-            console.warn("Attempted to update protected company fields.");
-            // Unset forbidden fields instead of throwing error?
-            delete companyUpdates.id;
-            delete companyUpdates.reseller_id; // Admins shouldn't change their reseller link directly
-            delete companyUpdates.created_at;
-            delete companyUpdates.updated_at;
+        // Basic validation can still happen here if needed.
+        if (companyUpdates.company_name === '') {
+            throw new Error("Company name cannot be empty.");
         }
-         if (addressUpdates && (addressUpdates.id || addressUpdates.created_at || addressUpdates.updated_at)) {
-             console.warn("Attempted to update protected address fields.");
-             delete addressUpdates.id;
-             delete addressUpdates.created_at;
-             delete addressUpdates.updated_at;
-         }
+        // Add more validation as needed...
 
 
-        // Use transaction if updating multiple tables (company and address)
-        // Supabase JS client doesn't directly support multi-table transactions easily without RPC.
-        // We'll perform updates sequentially. If one fails, the other might have succeeded.
-        // Consider using a PL/pgSQL function (RPC) for atomicity if critical.
-
-        let updatedCompanyData = null;
-
-        // 1. Update Company table
-        if (Object.keys(companyUpdates).length > 0) {
-            console.log(`CompanyService: Updating companies table for ID ${companyId} with:`, companyUpdates);
-            const { data: companyResult, error: companyError } = await supabase
-                .from('companies')
-                .update(companyUpdates)
-                .eq('id', companyId)
-                .select() // Select updated data
-                .single();
-
-            if (companyError) {
-                console.error(`CompanyService: Error updating companies table for ${companyId}:`, companyError.message);
-                throw new Error(`Failed to update company details: ${companyError.message}`);
+        console.log(`CompanyService: Calling RPC update_company_and_address for user ${userId}`);
+        // *** USE THE RPC FUNCTION ***
+        const { data: updatedCompanyData, error: rpcError } = await supabase.rpc(
+            'update_company_and_address',
+            {
+                // Ensure parameters are passed as JSONB objects
+                p_company_updates: companyUpdates || {}, // Pass company updates JSON, default to empty object
+                p_address_updates: addressUpdates || {} // Pass address updates JSON, default to empty object
             }
-            updatedCompanyData = companyResult;
-            console.log(`CompanyService: Companies table updated for ${companyId}.`);
+        );
+
+        if (rpcError) {
+            console.error(`CompanyService: RPC call failed for user ${userId}:`, rpcError);
+            // Check for specific errors raised by the function
+            if (rpcError.message.includes('is not a company admin')) {
+                 throw new Error('Forbidden: You are not authorized to perform this update.');
+            }
+            // Provide a more generic error for other cases
+            throw new Error(rpcError.message || 'Failed to update company information via RPC.');
         }
 
-        // 2. Update Address table (Upsert logic: update if exists, insert if not)
-        if (addressUpdates && Object.keys(addressUpdates).length > 0) {
-             // Find the current address ID associated with the company
-             const { data: currentCompany, error: fetchError } = await supabase
-                 .from('companies')
-                 .select('address_id')
-                 .eq('id', companyId)
-                 .single();
-
-             if (fetchError) throw new Error(`Failed to fetch current address ID: ${fetchError.message}`);
-
-             const currentAddressId = currentCompany?.address_id;
-
-             if (currentAddressId) {
-                 // Address exists, update it
-                 console.log(`CompanyService: Updating addresses table for ID ${currentAddressId} with:`, addressUpdates);
-                 const { error: addressError } = await supabase
-                     .from('addresses')
-                     .update(addressUpdates)
-                     .eq('id', currentAddressId);
-
-                 if (addressError) {
-                     console.error(`CompanyService: Error updating addresses table for ${currentAddressId}:`, addressError.message);
-                     throw new Error(`Failed to update address details: ${addressError.message}`);
-                 }
-                 console.log(`CompanyService: Addresses table updated for ${currentAddressId}.`);
-             } else {
-                 // No address exists, insert a new one and link it
-                 console.log(`CompanyService: Inserting new address for company ${companyId} with:`, addressUpdates);
-                 const { data: newAddress, error: insertError } = await supabase
-                     .from('addresses')
-                     .insert(addressUpdates)
-                     .select('id')
-                     .single();
-
-                 if (insertError) {
-                     console.error(`CompanyService: Error inserting new address for company ${companyId}:`, insertError.message);
-                     throw new Error(`Failed to create address: ${insertError.message}`);
-                 }
-
-                 const newAddressId = newAddress.id;
-                 console.log(`CompanyService: New address created with ID ${newAddressId}. Linking to company ${companyId}.`);
-
-                 // Link the new address ID back to the company
-                 const { error: linkError } = await supabase
-                     .from('companies')
-                     .update({ address_id: newAddressId })
-                     .eq('id', companyId);
-
-                 if (linkError) {
-                     console.error(`CompanyService: Error linking new address ${newAddressId} to company ${companyId}:`, linkError.message);
-                     // This leaves an orphaned address. Consider cleanup or RPC.
-                     throw new Error(`Failed to link new address to company: ${linkError.message}`);
-                 }
-                 console.log(`CompanyService: Successfully linked new address ${newAddressId} to company ${companyId}.`);
-             }
+        if (!updatedCompanyData) {
+             console.error(`CompanyService: RPC call for user ${userId} returned no data.`);
+             throw new Error('Update operation completed, but failed to retrieve updated company data.');
         }
 
-        // 3. Fetch the final updated company data including potentially updated/created address and reseller info
-        console.log(`CompanyService: Refetching updated company data for ${companyId}`);
-        const finalData = await getCompanyForAdmin(userId); // Re-use the fetch logic
-        return finalData;
+        console.log(`CompanyService: Successfully updated company via RPC for user ${userId}.`);
+        // The RPC function returns the data in the desired format already
+        return updatedCompanyData;
 
     } catch (error) {
-        console.error(`CompanyService: Error in updateCompanyForAdmin for user ${userId}:`, error.message);
-        throw error; // Re-throw to be handled by the route
+        console.error(`CompanyService: Error in updateCompanyForAdmin (RPC) for user ${userId}:`, error.message);
+        // Re-throw the specific error message caught or a generic one
+        throw new Error(error.message || 'An unexpected error occurred while updating company information.');
     }
 };
 
@@ -198,28 +147,36 @@ export const getUsersForCompany = async (targetCompanyId, requestingUserId, requ
         if (requestingUserRole === 'company_admin') {
             // Company Admin can only see users of their own company.
             const adminCompanyId = await getUserCompanyId(requestingUserId);
+             if (!adminCompanyId) {
+                 throw new Error('Forbidden: Could not verify your company affiliation.');
+             }
             if (adminCompanyId !== targetCompanyId) {
                 console.warn(`CompanyService: Company Admin ${requestingUserId} attempted to access users of company ${targetCompanyId}`);
                 throw new Error('Forbidden: You can only view users of your own company.');
             }
         } else if (requestingUserRole === 'reseller_admin') {
             // Reseller Admin can only see users of companies assigned to their reseller ID.
-            // 1. Get reseller ID for the requesting user.
-            // 2. Check if targetCompanyId belongs to that reseller.
-            // This requires joining users -> resellers and companies -> resellers.
-            // Using supabaseAdmin might be simpler here if RLS is complex.
+            // Use Admin Client to check the link between the requesting user (via resellers.admin_user_id)
+            // and the target company (via companies.reseller_id).
              const adminClient = createAdminClient();
              if (!adminClient) throw new Error("Admin client is required for Reseller Admin check.");
 
-             const { data: resellerLink, error: linkError } = await adminClient
+             // Check if the target company belongs to the reseller managed by the requesting user
+             const { data: checkData, error: checkError } = await adminClient
                 .from('resellers')
                 .select('id, companies!inner(id)')
-                .eq('admin_user_id', requestingUserId) // Assuming a link from resellers to their admin user
-                .eq('companies.id', targetCompanyId)
-                .maybeSingle();
+                .eq('admin_user_id', requestingUserId) // Check if this user is the admin for the reseller
+                .eq('companies.id', targetCompanyId) // Check if the target company is linked to this reseller
+                .maybeSingle(); // Use maybeSingle as the link might not exist
 
-             if (linkError) throw new Error(`Error checking reseller permissions: ${linkError.message}`);
-             if (!resellerLink) throw new Error(`Forbidden: Company ${targetCompanyId} is not managed by you.`);
+             if (checkError) {
+                 console.error(`CompanyService: Error checking reseller permissions for user ${requestingUserId} and company ${targetCompanyId}:`, checkError.message);
+                 throw new Error(`Error checking reseller permissions: ${checkError.message}`);
+             }
+             if (!checkData) {
+                 console.warn(`CompanyService: Reseller Admin ${requestingUserId} authorization failed for company ${targetCompanyId}.`);
+                 throw new Error(`Forbidden: Company ${targetCompanyId} is not managed by you or you are not the designated admin for the reseller.`);
+             }
 
              console.log(`CompanyService: Reseller Admin ${requestingUserId} authorized for company ${targetCompanyId}.`);
 
@@ -234,14 +191,9 @@ export const getUsersForCompany = async (targetCompanyId, requestingUserId, requ
         // Fetch users belonging to the target company
         // Use standard client - RLS on 'users' table should allow admins (CA, RA, GA)
         // to see users based on their own role and the target user's company_id.
-        // The RLS policy needs to handle these relationships.
-        // Example RLS (simplified):
-        // - GA: true
-        // - RA: EXISTS (SELECT 1 FROM companies c JOIN resellers r ON c.reseller_id = r.id WHERE c.id = users.company_id AND r.admin_user_id = auth.uid())
-        // - CA: users.company_id = (SELECT company_id FROM users WHERE id = auth.uid())
         const { data: users, error: usersError } = await supabase
             .from('users')
-            .select('id, email, role, created_at') // Select only necessary fields
+            .select('id, email, role, created_at, first_name, last_name, is_active, license_consumed') // Select more fields for user management
             .eq('company_id', targetCompanyId);
 
         if (usersError) {

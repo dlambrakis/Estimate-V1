@@ -1,93 +1,182 @@
 // src/backend/middleware/authMiddleware.js
-import jwt from 'jsonwebtoken';
-import { supabase } from '../../config/supabaseClient.js'; // Adjusted path
+import jwt from 'jsonwebtoken'; // Keep for jwt.decode
+import crypto from 'crypto'; // Import crypto for manual verification
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-    console.error("FATAL ERROR: JWT_SECRET is not defined in environment variables.");
-    // Optionally exit the process if JWT secret is critical for startup
-    // process.exit(1);
+// --- Log JWT Library Version (Still useful for decode) ---
+try {
+    const jwtPkg = require('jsonwebtoken/package.json');
+    console.log(`AuthMiddleware: Using jsonwebtoken version: ${jwtPkg.version} (primarily for decode)`);
+} catch (e) {
+    console.error("AuthMiddleware: Could not determine jsonwebtoken version.", e);
 }
+// -----------------------------
+
+console.log("AuthMiddleware: Module loading...");
+
+const RAW_JWT_SECRET_FROM_ENV = process.env.JWT_SECRET;
+const isProduction = process.env.NODE_ENV === 'production';
+
+console.log(`AuthMiddleware: Checking RAW_JWT_SECRET from env. Raw value found: '${RAW_JWT_SECRET_FROM_ENV}'`);
+
+if (!RAW_JWT_SECRET_FROM_ENV || RAW_JWT_SECRET_FROM_ENV === 'your-super-secret-and-strong-jwt-secret-key') {
+    console.error("FATAL ERROR: JWT_SECRET environment variable is missing, empty, or still using the default placeholder value.");
+    console.error(`FATAL ERROR: Current value of process.env.JWT_SECRET during check: '${RAW_JWT_SECRET_FROM_ENV}'`);
+    console.error("Please ensure JWT_SECRET is correctly set in your .env file with the PLAIN TEXT secret from Supabase.");
+    process.exit(1);
+}
+
+// --- Trim potential whitespace ---
+const RAW_JWT_SECRET = RAW_JWT_SECRET_FROM_ENV.trim();
+if (RAW_JWT_SECRET !== RAW_JWT_SECRET_FROM_ENV && !isProduction) {
+    console.warn("AuthMiddleware: Trimmed whitespace from JWT_SECRET environment variable.");
+}
+console.log(`AuthMiddleware: Using trimmed RAW JWT_SECRET string (length: ${RAW_JWT_SECRET.length}) for manual verification.`);
+// ---------------------------------
+
 
 export const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (token == null) {
-        console.log("AuthMiddleware: No token provided");
+        if (!isProduction) console.log("AuthMiddleware: No token provided");
         return res.status(401).json({ message: 'Authentication token required' });
     }
 
+    if (!isProduction) {
+        console.log("AuthMiddleware: Received token (length):", token.length);
+        if (token.length > 10) {
+            console.log(`AuthMiddleware: Token start/end: ${token.substring(0, 5)}...${token.slice(-5)}`);
+        }
+    }
+
     try {
-        // 1. Verify JWT signature locally using the secret
-        const decoded = jwt.verify(token, JWT_SECRET);
-        console.log("AuthMiddleware: JWT verified locally, decoded:", decoded);
+        // --- MANUAL JWT VERIFICATION ---
+        console.log("AuthMiddleware: Attempting MANUAL JWT verification using Node crypto...");
 
-        // 2. Optional but recommended: Verify the token with Supabase Auth to ensure it hasn't been revoked
-        //    This requires setting the session for the Supabase client instance.
-        //    Note: supabase (anon key client) cannot validate arbitrary tokens directly without user context.
-        //    Instead, we rely on the local verification and the short expiry of JWTs.
-        //    For stricter validation, you might need a Supabase Admin client call here,
-        //    or structure your RLS policies to implicitly validate the user's existence/status.
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 3) {
+            console.error("AuthMiddleware: Invalid JWT format - does not have 3 parts.");
+            return res.status(401).json({ message: 'Invalid token format' });
+        }
 
-        // 3. Attach decoded user information (including Supabase user ID and custom claims like role) to the request object
-        req.user = {
-            id: decoded.sub, // Supabase User ID from 'sub' claim
-            role: decoded.user_metadata?.role || decoded.role, // Get role from metadata or root claim
-            email: decoded.email,
-            // Add any other relevant claims you put in your JWT
-        };
-         console.log("AuthMiddleware: User attached to request:", req.user);
+        const headerAndPayload = tokenParts[0] + '.' + tokenParts[1];
+        const signatureFromToken = tokenParts[2];
 
-        if (!req.user.id) {
+        // Create HMAC SHA256
+        const hmac = crypto.createHmac('sha256', RAW_JWT_SECRET);
+        hmac.update(headerAndPayload);
+        const calculatedDigest = hmac.digest('base64');
+
+        // Convert Base64 to Base64URL
+        const calculatedSignature = calculatedDigest
+            .replace(/\+/g, '-') // Replace + with -
+            .replace(/\//g, '_') // Replace / with _
+            .replace(/=+$/, ''); // Remove trailing =
+
+        if (calculatedSignature !== signatureFromToken) {
+            console.error("AuthMiddleware: MANUAL VERIFICATION FAILED! Signatures do NOT match.");
+            console.error(`AuthMiddleware: Calculated: ${calculatedSignature}`);
+            console.error(`AuthMiddleware: From Token: ${signatureFromToken}`);
+            return res.status(403).json({ message: 'Token signature is invalid' });
+        }
+
+        console.log("AuthMiddleware: MANUAL VERIFICATION SUCCESSFUL! Signature matches.");
+
+        // --- Decode Payload (Signature is verified) ---
+        // We can safely decode now. Using jwt.decode is convenient.
+        const decoded = jwt.decode(token);
+
+        if (!decoded) {
+             console.error("AuthMiddleware: Could not decode token payload after successful signature verification.");
+             return res.status(401).json({ message: 'Invalid token: Payload unreadable' });
+        }
+
+        // Check expiration MANUALLY (jwt.decode doesn't verify expiration)
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        if (decoded.exp && decoded.exp < currentTimestamp) {
+            console.log("AuthMiddleware: Token expired (checked manually).");
+            return res.status(401).json({ message: 'Token expired' });
+        }
+
+        // --- Extract User Info ---
+        const userId = decoded.sub;
+        const userMetadataRole = decoded.user_metadata?.role;
+        const topLevelRole = decoded.role; // Less reliable, prefer user_metadata
+
+        if (!userId) {
              console.error("AuthMiddleware: JWT 'sub' claim (user ID) is missing.");
              return res.status(401).json({ message: 'Invalid token: User ID missing' });
         }
-         if (!req.user.role) {
-             console.warn("AuthMiddleware: User role is missing in JWT claims.");
-             // Decide if this is an error or just a warning depending on your app logic
-             // return res.status(401).json({ message: 'Invalid token: User role missing' });
-         }
+
+        // Prioritize user_metadata.role
+        let assignedRole = userMetadataRole || topLevelRole;
+
+        if (!assignedRole) {
+            console.error(`AuthMiddleware: User role is missing in JWT claims (user_metadata.role, role) for user ${userId}. Denying access.`);
+            return res.status(403).json({ message: 'Forbidden: Role information missing' });
+        } else if (!userMetadataRole && topLevelRole === 'authenticated') {
+            console.warn(`AuthMiddleware: User ${userId} has basic 'authenticated' role. Specific role missing in user_metadata.`);
+            // Allow 'authenticated' if no specific role, but log warning.
+            assignedRole = 'authenticated';
+        } else if (!userMetadataRole && topLevelRole && topLevelRole !== 'authenticated') {
+             if (!isProduction) console.log(`AuthMiddleware: Using top-level role '${topLevelRole}' for user ${userId} as user_metadata.role is missing.`);
+             assignedRole = topLevelRole; // Fallback, but user_metadata is preferred
+        } else if (userMetadataRole) {
+             if (!isProduction) console.log(`AuthMiddleware: Using role '${userMetadataRole}' from user_metadata for user ${userId}.`);
+             assignedRole = userMetadataRole;
+        }
 
 
-        next(); // Proceed to the next middleware or route handler
+        req.user = {
+            id: userId,
+            role: assignedRole,
+            email: decoded.email,
+            // Add other relevant decoded fields if needed
+        };
+
+        if (!isProduction) console.log("AuthMiddleware: User attached to request:", req.user);
+
+        next();
+
     } catch (err) {
-        console.error("AuthMiddleware: Token verification failed:", err.message);
-        if (err instanceof jwt.TokenExpiredError) {
-            return res.status(401).json({ message: 'Token expired' });
-        }
-        if (err instanceof jwt.JsonWebTokenError) {
-            return res.status(403).json({ message: 'Token is invalid' });
-        }
-        // Handle other potential errors during verification
+        // Catch errors from crypto or other unexpected issues
+        console.error(`AuthMiddleware: Unexpected error during manual token processing: ${err.name} - ${err.message}`);
+        console.error(err.stack); // Log stack for unexpected errors
         return res.status(500).json({ message: 'Could not process token' });
     }
 };
 
-
-// Middleware to authorize based on role
+// --- Role Authorization Logic (Remains the same) ---
 export const authorizeRole = (allowedRoles) => {
     return (req, res, next) => {
-        if (!req.user || !req.user.role) {
-            console.warn("AuthorizeRole: User or role not found on request. Ensure authenticateToken runs first.");
-            // This case should ideally be caught by authenticateToken, but check defensively
-            return res.status(403).json({ message: 'Forbidden: Role information missing' });
+        const rolesToCheck = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
+        if (!req.user || typeof req.user.role !== 'string') {
+             console.warn("AuthorizeRole: User or role not found/invalid on request. Ensure authenticateToken runs first and populates req.user correctly.");
+             return res.status(403).json({ message: 'Forbidden: Role information missing or invalid' });
         }
 
         const userRole = req.user.role;
-        console.log(`AuthorizeRole: Checking if user role "${userRole}" is in allowed roles: [${allowedRoles.join(', ')}]`);
 
-        if (Array.isArray(allowedRoles) && allowedRoles.includes(userRole)) {
-            next(); // Role is allowed, proceed
+        if (!isProduction) {
+            console.log(`AuthorizeRole: Checking if user role "${userRole}" is in allowed roles: [${rolesToCheck.join(', ')}]`);
+        }
+
+        if (rolesToCheck.includes(userRole)) {
+            if (!isProduction) console.log(`AuthorizeRole: Access GRANTED for role "${userRole}".`);
+            next();
         } else {
-            console.warn(`AuthorizeRole: Access denied for role "${userRole}". Required: ${allowedRoles.join(', ')}`);
+            console.warn(`AuthorizeRole: Access DENIED for role "${userRole}". Required: ${rolesToCheck.join(', ')}`);
             res.status(403).json({ message: `Forbidden: Access denied for role "${userRole}"` });
         }
     };
 };
 
-// Example alias for specific roles if needed (though using authorizeRole directly is often clearer)
 export const isCompanyAdmin = authorizeRole(['company_admin']);
 export const isResellerAdmin = authorizeRole(['reseller_admin']);
 export const isGlobalAdmin = authorizeRole(['global_admin']);
+// Ensure 'authenticated' is included if basic logged-in users need access to some routes
+export const isAuthenticated = authorizeRole(['authenticated', 'company_admin', 'reseller_admin', 'global_admin']);
