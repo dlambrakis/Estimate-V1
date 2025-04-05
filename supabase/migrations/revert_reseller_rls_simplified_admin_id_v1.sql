@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Revert Reseller RLS Policy (Simplified admin_user_id Check)
 
       **PURPOSE:** Reverts the Reseller Admin SELECT RLS policy on `public.resellers`
@@ -40,4 +39,3 @@
 
     -- Note: The UPDATE policy "RESL: Allow RA UPDATE on own reseller record"
     -- created previously remains active.
-    ```

@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # TEMP DEBUG: Reseller RLS Policy (Hardcoded admin_user_id Check)
 
       **PURPOSE:** Temporarily replaces the Reseller Admin SELECT RLS policy on `public.resellers`
@@ -42,4 +41,3 @@
       );
 
     -- Note: Other policies (Global Admin, service_role, UPDATE) remain unchanged.
-    ```

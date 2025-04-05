@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Update Reseller RLS Policy (Subquery Check Only)
 
       **PURPOSE:** Isolates the subquery condition in the Reseller Admin SELECT RLS policy
@@ -38,4 +37,3 @@
     -- Note: The UPDATE policy "RESL: Allow RA UPDATE on own reseller record" created in the
     -- previous step remains active and uses the admin_user_id check with the function.
     -- No changes needed for the UPDATE policy here.
-    ```

@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Revert Temporary Reseller RLS and Restore Policies (v1)
 
       **PURPOSE:** This migration reverts the temporary permissive RLS policy
@@ -74,4 +73,3 @@
           WHERE c.id = get_my_user_company_id() -- Use function to get user's company_id
         )
       );
-    ```

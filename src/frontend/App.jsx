@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage'; // Correct path
 import CompanyAdminDashboard from './pages/CompanyAdminDashboard'; // Correct path
 import ResellerAdminDashboard from './pages/ResellerAdminDashboard'; // Correct path
 import GlobalAdminDashboard from './pages/GlobalAdminDashboard'; // Correct path
+import CompanyUserDashboard from './pages/CompanyUserDashboard'; // Import the new dashboard
 import ProtectedRoute from './components/ProtectedRoute'; // Correct path
 
 // Helper function to determine the correct dashboard path based on role
@@ -17,10 +18,11 @@ const getDashboardPath = (role) => {
       return '/reseller-dashboard';
     case 'global_admin':
       return '/global-dashboard';
+    case 'company_user': // Add case for company_user
+      return '/user-dashboard'; // Direct to the new dashboard
     default:
       console.warn(`App.jsx: Unknown role '${role}', defaulting dashboard path to /login`);
       // Fallback if role is unknown or user has no specific role dashboard
-      // Redirecting to login might be safer if role determination fails
       return '/login'; // Defaulting to login might cause issues if already logged in, but let's see
   }
 };
@@ -77,6 +79,15 @@ function App() {
           element={
             <ProtectedRoute user={user} allowedRoles={['global_admin']}>
               <GlobalAdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        {/* Add Route for Company User Dashboard */}
+        <Route
+          path="/user-dashboard"
+          element={
+            <ProtectedRoute user={user} allowedRoles={['company_user']}>
+              <CompanyUserDashboard />
             </ProtectedRoute>
           }
         />

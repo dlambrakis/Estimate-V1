@@ -1,4 +1,4 @@
-    // src/backend/routes/profileRoutes.js
+// src/backend/routes/profileRoutes.js
     import express from 'express';
     import { authenticateToken } from '../middleware/authMiddleware.js'; // Adjusted path
     import { supabase } from '../../config/supabaseClient.js'; // Adjusted path

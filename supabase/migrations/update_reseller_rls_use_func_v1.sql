@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Update Reseller RLS Policies to Use get_my_auth_uid Function
 
       **PURPOSE:** Modifies the Reseller Admin SELECT and UPDATE RLS policies
@@ -46,4 +45,3 @@
          AND
          admin_user_id = public.get_my_auth_uid() -- Use the new function
       );
-    ```

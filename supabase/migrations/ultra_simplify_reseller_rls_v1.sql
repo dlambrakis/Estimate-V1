@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Ultra-Simplify Reseller RLS Policy (v1)
 
       **PURPOSE:** To further isolate the RLS failure for Reseller Admins on the `public.resellers` table during joins.
@@ -35,4 +34,3 @@
       );
 
     -- Note: Other policies (Global Admin, service_role, UPDATE, Company Member SELECT) remain unchanged.
-    ```

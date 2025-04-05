@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Revert Temporary Debug Reseller RLS Policy (Hardcoded ID)
 
       **PURPOSE:** Removes the temporary debugging RLS policy (`TEMP_DEBUG: Allow RA SELECT via hardcoded admin_user_id`)
@@ -33,4 +32,3 @@
       );
 
     -- Note: Other policies (Global Admin, service_role, UPDATE, Company Member SELECT) remain unchanged.
-    ```

@@ -19,14 +19,12 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   if (allowedRoles && !allowedRoles.includes(role)) {
     // User is logged in but does not have the required role
     console.warn(`ProtectedRoute: Access denied for role "${role}". Required: ${allowedRoles.join(', ')}`);
-    // Redirect to a generic dashboard or an unauthorized page
-    // For simplicity, redirecting to login might force re-auth or show the correct dashboard if roles changed
-    // A better approach might be a dedicated '/unauthorized' page or redirect based on their actual role's dashboard
-     // Determine fallback path based on actual role
+    // Redirect to their appropriate dashboard based on their actual role
      let fallbackPath = '/login'; // Default fallback
      if (role === 'company_admin') fallbackPath = '/company-dashboard';
      else if (role === 'reseller_admin') fallbackPath = '/reseller-dashboard';
      else if (role === 'global_admin') fallbackPath = '/global-dashboard';
+     else if (role === 'company_user') fallbackPath = '/user-dashboard'; // Add fallback for company_user
 
     return <Navigate to={fallbackPath} replace />;
   }

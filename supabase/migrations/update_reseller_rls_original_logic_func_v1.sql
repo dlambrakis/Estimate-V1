@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Update Reseller RLS Policies (Original Logic + Function)
 
       **PURPOSE:** Restores the original logic for the Reseller Admin SELECT RLS policy
@@ -52,4 +51,3 @@
          AND
          admin_user_id = public.get_my_auth_uid() -- Use the function
       );
-    ```

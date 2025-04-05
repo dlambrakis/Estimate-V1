@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Create get_my_auth_uid Function
 
       **PURPOSE:** Creates a SECURITY DEFINER function to reliably retrieve the
@@ -29,4 +28,3 @@
 
     -- Grant execute permission to authenticated users
     GRANT EXECUTE ON FUNCTION public.get_my_auth_uid() TO authenticated;
-    ```

@@ -10,7 +10,8 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { role } = useAuth(); // Get role to redirect correctly after login
+  // Removed role import as we won't use it directly for navigation here
+  // const { role } = useAuth();
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -33,35 +34,20 @@ function LoginPage() {
       console.log("Login successful, user data:", data.user);
 
       // The AuthContext listener will handle setting user/role state.
-      // We just need to navigate. Determine where to redirect.
-      const from = location.state?.from?.pathname || getDashboardPath(role || data.user?.user_metadata?.role); // Use role from context or newly fetched user data as fallback
-
-      console.log("Navigating to:", from);
-      navigate(from, { replace: true });
+      // Navigate to the root. App.jsx will handle redirecting to the correct dashboard.
+      console.log("Navigating to root ('/') after login...");
+      navigate('/', { replace: true });
 
     } catch (catchError) {
       console.error("Unexpected login error:", catchError);
       setError('An unexpected error occurred during login.');
-      setLoading(false);
+    } finally {
+        // Ensure loading is set to false even if navigation happens quickly
+        setLoading(false);
     }
   };
 
-    // Helper function to determine the correct dashboard path based on role
-    // Duplicated here for immediate redirection logic, ideally centralize this
-    const getDashboardPath = (userRole) => {
-      switch (userRole) {
-        case 'company_admin':
-          return '/company-dashboard';
-        case 'reseller_admin':
-          return '/reseller-dashboard';
-        case 'global_admin':
-          return '/global-dashboard';
-        default:
-          console.warn("LoginPage: Could not determine dashboard for role:", userRole);
-          return '/'; // Fallback to root, App.jsx will handle further redirection
-      }
-    };
-
+    // Removed the local getDashboardPath function as it's no longer needed here
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">

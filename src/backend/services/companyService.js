@@ -1,27 +1,84 @@
 // src/backend/services/companyService.js
 import { supabase, supabaseAdmin, createAdminClient } from '../../config/supabaseClient.js'; // Adjusted path
 
-// Helper function to get user's company ID (using standard client respecting RLS)
+// Helper function to get user's company ID (remains the same)
 const getUserCompanyId = async (userId) => {
-    console.log(`CompanyService: Fetching company ID for user ${userId}`);
-    const { data: user, error } = await supabase
-        .from('users')
-        .select('company_id')
-        .eq('id', userId)
-        .single();
+    // --- DETAILED LOGGING START ---
+    console.log(`DEBUG: getUserCompanyId called. Input userId: '${userId}' (Type: ${typeof userId})`);
 
+    if (!userId) {
+        console.error("DEBUG: getUserCompanyId received null or undefined userId. Throwing error.");
+        throw new Error("User ID cannot be null or undefined.");
+    }
+    // --- DETAILED LOGGING END ---
+
+    console.log(`CompanyService: Fetching company ID for user ${userId} using ADMIN client.`);
+
+    if (!supabaseAdmin) {
+        console.error("CompanyService: supabaseAdmin client is not available. Cannot fetch user company ID.");
+        throw new Error("Internal server error: Admin client configuration missing.");
+    }
+
+    // --- DETAILED LOGGING START ---
+    console.log(`DEBUG: Executing query: supabaseAdmin.from('users').select('company_id', { count: 'exact' }).eq('id', '${userId}').maybeSingle()`);
+    // --- DETAILED LOGGING END ---
+
+    const { data, error, count, status, statusText } = await supabaseAdmin // Use admin client
+        .from('users')
+        .select('company_id', { count: 'exact' }) // Request count explicitly
+        .eq('id', userId) // Use the validated userId
+        .maybeSingle(); // Use maybeSingle to handle 0 rows gracefully
+
+    // --- DETAILED LOGGING START ---
+    console.log("DEBUG: Supabase query result:");
+    console.log(`  Status: ${status} ${statusText}`);
+    console.log(`  Count: ${count}`);
+    console.log(`  Error: ${error ? JSON.stringify(error) : 'null'}`);
+    console.log(`  Data: ${data ? JSON.stringify(data) : 'null'}`);
+    // --- DETAILED LOGGING END ---
+
+    // Check for errors during the query itself
     if (error) {
-        console.error(`CompanyService: Error fetching company ID for user ${userId}:`, error.message);
-        throw new Error(`Failed to retrieve user's company affiliation: ${error.message}`);
+        console.error(`CompanyService: Error fetching company ID for user ${userId} (Admin Client):`, error.message);
+        // Log the full error object for more details
+        console.error("Full Supabase Error Object:", JSON.stringify(error, null, 2));
+        throw new Error(`Database error fetching user profile: ${error.message}`);
     }
-    if (!user || !user.company_id) {
-        console.warn(`CompanyService: User ${userId} is not associated with any company.`);
-        // Allow function to proceed but return null, let caller handle non-association
-        // throw new Error('User is not associated with a company.');
-        return null;
+
+    // Check the count explicitly
+    if (count === 0) {
+         console.warn(`CompanyService: User profile not found in users table for ID: ${userId} (Admin Client). Count was 0.`);
+         throw new Error(`User profile not found for ID: ${userId}`);
     }
-    console.log(`CompanyService: User ${userId} belongs to company ${user.company_id}`);
-    return user.company_id;
+
+    if (count > 1) {
+         // This should be impossible with the primary key constraint, but good to check.
+         console.error(`CompanyService: CRITICAL - Found multiple (${count}) user profiles for ID: ${userId}. Data inconsistency.`);
+         throw new Error(`Data integrity issue: Multiple profiles found for user ID: ${userId}`);
+    }
+
+    // At this point, we expect count to be 1
+    if (count !== 1) {
+        // This is a safeguard, should have been caught above.
+        console.error(`CompanyService: Unexpected count value (${count}) after checks for user ID: ${userId}.`);
+        throw new Error(`Unexpected database result count: ${count}`);
+    }
+
+    // Check if data is null/undefined even if count is 1
+    if (!data) {
+        // This case should theoretically not happen if count is 1 and no error occurred, but safeguard anyway.
+        console.error(`CompanyService: Count was 1 but data is null/undefined for ID: ${userId}. Unexpected error.`);
+        throw new Error(`Unexpected error retrieving profile data for user ID: ${userId}`);
+    }
+
+     if (!data.company_id) {
+         console.warn(`CompanyService: User ${userId} exists but is not associated with any company (company_id is null/missing in data).`);
+         // For getCompanyForAdmin, we need the ID, so throw error.
+         throw new Error('User is not associated with a company.');
+     }
+
+    console.log(`CompanyService: User ${userId} belongs to company ${data.company_id}`);
+    return data.company_id;
 };
 
 
@@ -29,56 +86,96 @@ const getUserCompanyId = async (userId) => {
 export const getCompanyForAdmin = async (userId) => {
     console.log(`CompanyService: getCompanyForAdmin called for user ${userId}`);
     try {
-        const companyId = await getUserCompanyId(userId); // Verify user belongs to a company
+        const companyId = await getUserCompanyId(userId); // Uses admin client
 
-        // Throw error if user is not associated with a company
-        if (!companyId) {
-             throw new Error('User is not associated with a company.');
+        // Ensure admin client is available for ALL data fetching in this function
+        if (!supabaseAdmin) {
+            console.error("CompanyService: supabaseAdmin client is not available. Cannot fetch company details.");
+            throw new Error("Internal server error: Admin client configuration missing.");
         }
 
-        // Fetch company details, including address and reseller info (name, contacts, address)
-        // Use the standard client - RLS policy on 'companies' should allow users
-        // to select their own company's details.
-        const { data: companyData, error: companyError } = await supabase
+        // Step 1: Fetch main company data using ADMIN client (bypasses RLS)
+        console.log(`CompanyService: Fetching main company data for company ${companyId} using ADMIN client.`);
+        const { data: companyData, error: companyError } = await supabaseAdmin // USE ADMIN CLIENT
             .from('companies')
-            .select(`
-                *,
-                address: addresses (*),
-                reseller: resellers (
-                    id,
-                    reseller_name,
-                    contact_email,
-                    contact_phone,
-                    address: addresses (*)
-                )
-            `)
+            .select('*') // Select all company fields, including address_id and reseller_id
             .eq('id', companyId)
-            .single();
+            .single(); // Use single() as we expect exactly one row for the ID
 
         if (companyError) {
-            console.error(`CompanyService: Error fetching company details for company ${companyId}:`, companyError.message);
+            console.error(`CompanyService: Error fetching main company data for company ${companyId} (Admin Client):`, companyError.message);
+            // If using .single(), PGRST116 means not found
+            if (companyError.code === 'PGRST116') throw new Error(`Company not found for ID: ${companyId}`);
             throw new Error(`Failed to fetch company details: ${companyError.message}`);
         }
-
         if (!companyData) {
-            console.warn(`CompanyService: Company ${companyId} not found, though user ${userId} is linked.`);
-            throw new Error(`Company not found for ID: ${companyId}`);
+             // Should be caught by .single() error, but safeguard
+             throw new Error(`Company not found for ID: ${companyId}`);
         }
 
-        // Rename reseller.reseller_name to reseller.name for frontend consistency if needed
-        if (companyData.reseller && companyData.reseller.reseller_name) {
-            companyData.reseller.name = companyData.reseller.reseller_name;
-            // delete companyData.reseller.reseller_name; // Optional: remove the original field
+        console.log("CompanyService: Main company data fetched (Admin Client):", JSON.stringify(companyData));
+
+        // Initialize final result object
+        const finalCompanyData = { ...companyData, address: null, reseller: null };
+
+        // Step 2: Fetch address if address_id exists using ADMIN client
+        if (companyData.address_id) {
+            console.log(`CompanyService: Attempting to fetch address ${companyData.address_id} using ADMIN client.`);
+            const { data: addressData, error: addressError } = await supabaseAdmin // USE ADMIN CLIENT
+                .from('addresses')
+                .select('*')
+                .eq('id', companyData.address_id)
+                .maybeSingle();
+
+            console.log(`CompanyService: Admin client address fetch result - Error: ${addressError ? JSON.stringify(addressError) : 'null'}, Data: ${addressData ? JSON.stringify(addressData) : 'null'}`);
+
+            if (addressError) {
+                console.warn(`CompanyService: Error fetching address ${companyData.address_id} (Admin Client): ${addressError.message}. Proceeding without address.`);
+            } else if (addressData) {
+                finalCompanyData.address = addressData;
+                console.log(`CompanyService: Successfully fetched and assigned address ${companyData.address_id} (Admin Client).`);
+            } else {
+                 console.warn(`CompanyService: Address ${companyData.address_id} linked to company ${companyId} not found (Admin Client).`);
+            }
+        } else {
+             console.log(`CompanyService: Company ${companyId} has no linked address_id.`);
         }
 
+        // Step 3: Fetch reseller if reseller_id exists using ADMIN client
+        if (companyData.reseller_id) {
+            console.log(`CompanyService: Attempting to fetch reseller ${companyData.reseller_id} using ADMIN client.`);
+            const { data: resellerData, error: resellerError } = await supabaseAdmin // USE ADMIN CLIENT
+                .from('resellers')
+                .select(`
+                    *,
+                    address: addresses!address_id (*)
+                `)
+                .eq('id', companyData.reseller_id)
+                .maybeSingle();
 
-        console.log(`CompanyService: Successfully fetched company details for company ${companyId}`);
-        return companyData;
+            console.log(`CompanyService: Admin client reseller fetch result - Error: ${resellerError ? JSON.stringify(resellerError) : 'null'}, Data: ${resellerData ? JSON.stringify(resellerData) : 'null'}`);
+
+            if (resellerError) {
+                console.warn(`CompanyService: Error fetching reseller ${companyData.reseller_id} (Admin Client): ${resellerError.message}. Proceeding without reseller.`);
+            } else if (resellerData) {
+                if (resellerData.reseller_name) {
+                    resellerData.name = resellerData.reseller_name;
+                }
+                finalCompanyData.reseller = resellerData;
+                console.log(`CompanyService: Successfully fetched and assigned reseller ${companyData.reseller_id} (Admin Client).`);
+            } else {
+                 console.warn(`CompanyService: Reseller ${companyData.reseller_id} linked to company ${companyId} not found (Admin Client).`);
+            }
+        } else {
+             console.log(`CompanyService: Company ${companyId} has no linked reseller_id.`);
+        }
+
+        console.log("CompanyService: Final combined data being returned:", JSON.stringify(finalCompanyData));
+        return finalCompanyData;
 
     } catch (error) {
-        console.error(`CompanyService: Error in getCompanyForAdmin for user ${userId}:`, error.message);
-        // Re-throw the error to be handled by the route
-        throw error;
+        console.error(`CompanyService: Error in getCompanyForAdmin (multi-query) for user ${userId}:`, error.message);
+        throw error; // Propagate specific error message
     }
 };
 
@@ -95,13 +192,15 @@ export const updateCompanyForAdmin = async (userId, updates) => {
 
         // Basic validation can still happen here if needed.
         if (companyUpdates.company_name === '') {
-            throw new Error("Company name cannot be empty.");
+            throw new Error("Validation failed: Company name cannot be empty.");
         }
         // Add more validation as needed...
 
 
         console.log(`CompanyService: Calling RPC update_company_and_address for user ${userId}`);
         // *** USE THE RPC FUNCTION ***
+        // Use the standard client, as the RPC function runs with invoker's rights
+        // and performs its own authorization checks internally.
         const { data: updatedCompanyData, error: rpcError } = await supabase.rpc(
             'update_company_and_address',
             {
@@ -146,6 +245,7 @@ export const getUsersForCompany = async (targetCompanyId, requestingUserId, requ
         // Authorization Checks:
         if (requestingUserRole === 'company_admin') {
             // Company Admin can only see users of their own company.
+            // Use the admin client helper to be safe
             const adminCompanyId = await getUserCompanyId(requestingUserId);
              if (!adminCompanyId) {
                  throw new Error('Forbidden: Could not verify your company affiliation.');
@@ -191,13 +291,19 @@ export const getUsersForCompany = async (targetCompanyId, requestingUserId, requ
         // Fetch users belonging to the target company
         // Use standard client - RLS on 'users' table should allow admins (CA, RA, GA)
         // to see users based on their own role and the target user's company_id.
+        // If this fails, check RLS policies on 'users'.
+        console.log(`CompanyService: Fetching users for company ${targetCompanyId} using STANDARD client.`);
         const { data: users, error: usersError } = await supabase
             .from('users')
             .select('id, email, role, created_at, first_name, last_name, is_active, license_consumed') // Select more fields for user management
             .eq('company_id', targetCompanyId);
 
         if (usersError) {
-            console.error(`CompanyService: Error fetching users for company ${targetCompanyId}:`, usersError.message);
+            console.error(`CompanyService: Error fetching users for company ${targetCompanyId} (Standard Client):`, usersError.message);
+             if (usersError.code === '42501') { // RLS violation
+                 console.error(`CompanyService: RLS VIOLATION fetching users for company ${targetCompanyId} by user ${requestingUserId}. Check 'users' table policies.`);
+                 throw new Error(`Forbidden: You do not have permission to view users for this company.`);
+             }
             throw new Error(`Failed to fetch users: ${usersError.message}`);
         }
 

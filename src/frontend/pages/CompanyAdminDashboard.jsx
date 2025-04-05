@@ -5,7 +5,7 @@ import CompanyProfile from '../components/CompanyProfile'; // Correct path
 import UserManagement from '../components/UserManagement'; // Correct path
 
 function CompanyAdminDashboard() {
-  const { logout, sessionToken } = useAuth();
+  const { logout, sessionToken } = useAuth(); // Destructure logout and sessionToken
   const [companyData, setCompanyData] = useState(null);
   const [loading, setLoading] = useState(true); // Start in loading state
   const [error, setError] = useState('');
@@ -75,7 +75,7 @@ function CompanyAdminDashboard() {
              <div className="flex justify-between items-center mb-6">
                  <h1 className="text-3xl font-bold text-red-600">Dashboard Error</h1>
                  <button
-                     onClick={logout}
+                     onClick={logout} // Add logout button here too
                      className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-700"
                  >
                      Logout
@@ -95,7 +95,7 @@ function CompanyAdminDashboard() {
                <div className="flex justify-between items-center mb-6">
                    <h1 className="text-3xl font-bold">Company Admin Dashboard</h1>
                    <button
-                       onClick={logout}
+                       onClick={logout} // Add logout button here too
                        className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-700"
                    >
                        Logout
@@ -112,12 +112,14 @@ function CompanyAdminDashboard() {
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Company Admin Dashboard</h1>
+        {/* --- Logout Button Added --- */}
         <button
           onClick={logout}
           className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-700"
         >
           Logout
         </button>
+        {/* --- End Logout Button --- */}
       </div>
 
        {/* Tab Navigation */}

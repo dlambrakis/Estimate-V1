@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Create get_my_auth_uid Function (v2 - Direct SQL)
 
       **PURPOSE:** Creates a SECURITY DEFINER function to reliably retrieve the
@@ -36,4 +35,3 @@
     -- Grant usage on the schema to the authenticated role if not already granted
     -- This might be necessary depending on default privileges
     GRANT USAGE ON SCHEMA public TO authenticated;
-    ```

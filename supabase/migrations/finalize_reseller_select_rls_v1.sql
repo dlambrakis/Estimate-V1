@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # Finalize Reseller Admin SELECT RLS Policy (v1)
 
       **PURPOSE:** To establish the final, secure RLS policy for Reseller Admins
@@ -76,4 +75,3 @@
           WHERE c.id = get_my_user_company_id() -- Use function
         )
       );
-    ```

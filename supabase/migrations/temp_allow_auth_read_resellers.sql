@@ -1,5 +1,4 @@
-```sql
-    /*
+/*
       # TEMPORARY: Allow Authenticated Read on Resellers (DEBUGGING)
 
       **PURPOSE:** This migration temporarily replaces the specific Reseller Admin
@@ -43,4 +42,3 @@
 
     -- Re-add GA SELECT separately if needed for other tests, but keep it simple for now.
     -- Re-add other necessary policies (like UPDATE for RA, GA full access) AFTER testing and reverting this.
-    ```
